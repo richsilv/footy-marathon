@@ -502,6 +502,7 @@ public class FootyMarathon implements ApplicationListener {
 				this.thinkCounter = this.thinkTime;
 				switch(this.state) {
 				case dribbling:
+					// Calculate dribbling scores
 					this.posTarget = goalTarget.rotate((float) Math.random()*20-10);
 					ArrayList<DirScore> directions = new ArrayList<DirScore>();
 					for (float ang = (float) Math.random() * 22.5f; ang < 360; ang += 22.5) {
@@ -519,9 +520,6 @@ public class FootyMarathon implements ApplicationListener {
 						directions.add(new DirScore(ang, basescore));
 					}
 					Collections.sort(directions, directions.get(0));
-//					System.out.println(directions.get(0).angle + ": " + directions.get(0).score);
-//					for (DirScore d: directions) System.out.println(d.angle + ": " + d.score);
-//					System.out.println("=================");
 					if (directions.get(0).score > 50) {
 						this.posTarget = this.position.cpy().add(new Vector2(directions.get(0).score - 50, 0).rotate(directions.get(0).angle));
 					}
@@ -529,47 +527,45 @@ public class FootyMarathon implements ApplicationListener {
 						this.posTarget = this.position.cpy();
 						this.velocity.scl(0.5f);
 					}
-					if (this.theirTeamPolar.length > 0 && this.theirTeamPolar[0].distance < 200) {
-						Player passTarget = null;
-						for (Player p: this.myTeam) {
-							int ind = this.myTeam.indexOf(p);
-							if (this.myTeamPolar[ind].distance < 600 && this.myTeamPolar[ind].distance > 100 &&
-									angCompare(this.myTeamPolar[ind].angle, this.angle) < 90) {
-								boolean reject = false;
-								for (Player o: this.theirTeam){
-									if (between(this, p, o, 15)) {
-										reject = true;
-									}
-								}
-								if (!reject) {
-									if (passTarget == null || Math.random() < 0.4f) passTarget = p;
+					// Calculate passing scores
+					Player passTarget = null;
+					for (Player p: this.myTeam) {
+						int ind = this.myTeam.indexOf(p);
+						if (this.myTeamPolar[ind].distance < 600 && this.myTeamPolar[ind].distance > 100 &&
+								angCompare(this.myTeamPolar[ind].angle, this.angle) < 90) {
+							boolean reject = false;
+							for (Player o: this.theirTeam){
+								if (between(this, p, o, 15)) {
+									reject = true;
 								}
 							}
-						}
-						if (passTarget != null && Math.random() > 0.3) {
-							Vector2 passDest = passTarget.position.cpy();
-							Vector2 passDir = passDest.cpy().sub(ball.position.x, ball.position.y);
-							if (Math.abs(passTarget.velocity.angle() - 90 - (180 * passTarget.team)) < 75  &&
-									(this.position.y - passTarget.position.y) * (1 - 2 * this.team) > 0) {
-								boolean reject = false;
-								for (Player o: this.theirTeam) {
-									if (!between(this, passDir.cpy().add(passTarget.velocity.cpy().scl(passDir.len()/250)), o, 15)) reject = true;
-								}
-								if (!reject) {
-									passDir.add(passTarget.velocity.cpy().scl(passDir.len()/350));
-								}
+							if (!reject) {
+								if (passTarget == null || Math.random() < 0.4f) passTarget = p;
 							}
-							this.runSpeed = 1;
-							ball.velocity = new Vector3(passDir.x, passDir.y, passDir.len()/100).nor().scl((float) Math.pow(passDir.len(), 0.7f) * 11);
-							ball.possession = -1;
-							posPlayer = null;
-							this.possession = false;
-							this.kicking = 0.4f;
 						}
-//						else {
-//							this.posTarget = this.position.cpy().add(new Vector2(100, 0).rotate(theirTeamPolar[0].angle + 90 - (180 * (float) Math.random())));
-//						}
 					}
+					if (passTarget != null && Math.random() > 0.3) {
+						Vector2 passDest = passTarget.position.cpy();
+						Vector2 passDir = passDest.cpy().sub(ball.position.x, ball.position.y);
+						if (Math.abs(passTarget.velocity.angle() - 90 - (180 * passTarget.team)) < 75  &&
+								(this.position.y - passTarget.position.y) * (1 - 2 * this.team) > 0) {
+							boolean reject = false;
+							for (Player o: this.theirTeam) {
+								if (!between(this, passDir.cpy().add(passTarget.velocity.cpy().scl(passDir.len()/250)), o, 15)) reject = true;
+							}
+							if (!reject) {
+								passDir.add(passTarget.velocity.cpy().scl(passDir.len()/350));
+							}
+						}
+						this.runSpeed = 1;
+						ball.velocity = new Vector3(passDir.x, passDir.y, passDir.len()/100).nor().scl((float) Math.pow(passDir.len(), 0.7f) * 11);
+						ball.possession = -1;
+						posPlayer = null;
+						this.possession = false;
+						this.kicking = 0.4f;
+					}
+					if (this.theirTeamPolar.length > 0 && this.theirTeamPolar[0].distance < 200) {continue;}
+					// Extra
 					if (this.calledFor != null) {
 						if (this.position.dst(this.calledFor.position) < 600 && this.position.dst(this.calledFor.position) > 150 &&
 								Math.abs(((this.calledFor.position.cpy().sub(this.position).angle() - this.angle + 180) % 360) - 180) < 120) {
