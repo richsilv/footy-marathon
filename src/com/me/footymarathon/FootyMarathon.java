@@ -18,6 +18,7 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.utils.Array;
 import java.io.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Collections;
 import java.util.Comparator;
@@ -25,7 +26,7 @@ import java.util.Comparator;
 import com.badlogic.gdx.Input.Keys;
 
 public class FootyMarathon implements ApplicationListener {
-
+    
 	public enum PlayerState {
 		chasing,
 		positioning,
@@ -33,7 +34,8 @@ public class FootyMarathon implements ApplicationListener {
 		marking,
 		dribbling,
 		moving,
-		runningon
+		runningon,
+		waiting
 	}
 	
 	public class Polar {
@@ -133,7 +135,9 @@ public class FootyMarathon implements ApplicationListener {
 			else if (this instanceof User) font.draw(batch, "P", this.position.x - 8, this.position.y + 42);
 			batch.draw(frame, this.position.x - this.SIZE/2, this.position.y - this.SIZE/2, this.SIZE/2, this.SIZE/2, this.SIZE, this.SIZE, 1f, 1f, 0);
 			if (this instanceof ComPlayer) {
-				font.draw(batch, this.label, this.position.x - 50, this.position.y + this.SIZE + 10);				
+				if (this.possession) font.setColor(1, 0, 1, 1);
+				font.draw(batch, this.label, this.position.x - font.getBounds(this.label).width/2, this.position.y + this.SIZE + 10);
+				if (this.possession) font.setColor(0, 0, 0, 1); 
 			}
 		}
 		
@@ -221,9 +225,8 @@ public class FootyMarathon implements ApplicationListener {
 					if (this.possession) {
 						this.possession = false;
 						this.kicking = Math.min(this.kickBuilder,  0.5f) + 0.4f;
-						messagea = "" + this.kicking;
 						Vector2 kickDir = new Vector2(this.kicking, 0).rotate(this.angle);
-						ball.velocity = new Vector3(kickDir.x, kickDir.y, (float) Math.pow(this.kicking, 1.5)).scl(1000);
+						ball.velocity = new Vector3(kickDir.x, kickDir.y, (float) Math.pow(this.kicking, 1.3)).scl(1000);
 						ball.possession = -1;
 						posPlayer = null;
 					}
@@ -284,7 +287,8 @@ public class FootyMarathon implements ApplicationListener {
 			if (Gdx.input.isKeyPressed(Keys.I)) {
 				if (!wasPressed) {
 					infoDump();
-					PAUSED = true;
+					if (posPlayer != null) PASSPAUSE = true;
+					else PAUSED = true;
 					wasPressed = true;
 				}
 			}
@@ -383,36 +387,13 @@ public class FootyMarathon implements ApplicationListener {
 		public void updatePlayer(float deltaTime) {
 			if (!this.possession) this.runSpeed = 1;
 			if(deltaTime == 0) return;
+			Vector2 ballPos = new Vector2(ball.position.x, ball.position.y);
 			Vector2 goalTarget = new Vector2(0, -980 + (this.team * 1920));
 			Vector2 offset = new Vector2(ball.position.x, ball.position.y).sub(goalTarget).nor().scl(10);
 			Vector2 dirTarget = new Vector2(ball.position.x, ball.position.y).add(offset);
 			// ACTIONS TO TAKE EVERY FRAME
 			switch(this.state) {
 			case chasing:
-				if (new Vector2(this.position.x, this.position.y).dst(new Vector2(ball.position.x, ball.position.y)) < (this.SIZE + Ball.SIZE) * 0.55
-						&& this.kicking <= 0 && ball.position.z < 50) {
-					if (this.tackling <= 0 && (ball.possession != (1-this.team)) &&
-							this.velocity.cpy().sub(ball.velocity.x, ball.velocity.y).len() < 500) {
-						clearPossession();
-						this.possession = true;
-						this.state = PlayerState.dribbling;
-						this.runSpeed = DRIB_PEN;
-						this.posTarget = goalTarget.rotate((float) Math.random()*40-20);
-						this.runon = 0;
-						passedTo = null;
-						ball.possession = this.team;
-						posPlayer = this;
-						ball.curl = 0;
-						ball.rotation = 0;
-						ball.velocity = new Vector3();
-					}
-					else if (this.tackling > 0) {
-						ball.velocity.lerp(new Vector3(this.velocity.x, this.velocity.y, 2).scl(1.5f), 0.2f);
-						if (posPlayer != null) {
-							posPlayer.stun = 0.8f;
-						}
-					}
-				}
 				this.posTarget = dirTarget;
 				if (posPlayer != null) {
 					float ang1 = new Vector2(ball.position.x, ball.position.y).sub(posPlayer.position).angle();
@@ -448,11 +429,11 @@ public class FootyMarathon implements ApplicationListener {
 					this.state = PlayerState.chasing;
 				}
 				// PUSH BALL AHEAD
-				else if (this.position.dst(ball.position.x, ball.position.y) < this.SIZE * CONTROL * 0.75) {
-					Vector2 bestBallDir = this.position.cpy().add(new Vector2(this.posTarget.cpy().sub(this.position).nor().scl(SIZE + CONTROL)))
-							.sub(new Vector2(ball.position.x, ball.position.y)).scl(1).limit(this.dirSpeed * this.runSpeed * 1.5f);
-					ball.velocity.add(new Vector3(bestBallDir.x, bestBallDir.y, -ball.velocity.z * 0.5f));
-				}
+//				else if (this.position.dst(ball.position.x, ball.position.y) < this.SIZE * CONTROL * 0.75) {
+//					Vector2 bestBallDir = this.position.cpy().add(new Vector2(this.posTarget.cpy().sub(this.position).nor().scl(SIZE + CONTROL)))
+//							.sub(new Vector2(ball.position.x, ball.position.y)).scl(1).limit(this.dirSpeed * this.runSpeed * 1.5f);
+//					ball.velocity.add(new Vector3(bestBallDir.x, bestBallDir.y, -ball.velocity.z * 0.5f));
+//				}
 				if (this.position.dst(this.posTarget) < 1) this.posTarget = this.position;
 				break;
 			case moving:
@@ -465,28 +446,33 @@ public class FootyMarathon implements ApplicationListener {
 			case stunned:
 				break;
 			case runningon:
-				if (this.position.dst(new Vector2(ball.position.x, ball.position.y)) < (this.SIZE + Ball.SIZE) * 0.55
-						&& this.kicking <= 0 && ball.position.z < 50) {
+				if (this.position.dst(new Vector2(ball.position.x, ball.position.y)) < (this.SIZE + Ball.SIZE) * 0.80
+						&& ball.position.z < 50) {
 					if (this.tackling <= 0 && (ball.possession != (1-this.team)) &&
 							this.velocity.cpy().sub(ball.velocity.x, ball.velocity.y).len() < 500) {
 						clearPossession();
 						this.possession = true;
-						Vector2 controlVector = new Vector2(this.position.x - ball.position.x, this.position.y - ball.position.y);
-						ball.velocity = new Vector3(this.velocity.x + controlVector.x, this.velocity.y + controlVector.y, 0);
+						Vector2 controlVector = new Vector2(this.position.x - ball.position.x, this.position.y - ball.position.y).scl(0.5f).
+								add(this.velocity.cpy().scl(0.8f));
+						ball.velocity = new Vector3(controlVector.x, controlVector.y, 0);
 						this.state = PlayerState.dribbling;
 						this.runSpeed = DRIB_PEN;
 						this.posTarget = goalTarget.rotate((float) Math.random()*40-20);
 						this.runon = 0;
+						this.kicking = 0.1f;
 						ball.possession = this.team;
 						posPlayer = this;
 						ball.curl = 0;
 						ball.rotation = 0;
-						ball.velocity = new Vector3();
 					}
 				}
-				else if (this.runon >= 0.5f) {
-					this.velocity = passEnd.cpy().sub(this.position).scl(1/(this.runon-0.5f)).limit(this.dirSpeed * this.runSpeed);
+				else if (this.runon >= 0) {
+					this.velocity = passEnd.cpy().sub(this.position).sub(this.position.cpy().sub(goalTarget).limit(10)).scl(60).limit(this.dirSpeed * this.runSpeed); // .sub(this.position.cpy().sub(goalTarget).limit(10))
 				}
+				break;
+			case waiting:
+				this.posTarget = this.position.cpy().add(this.velocity);
+				this.velocity.scl(0.94f);
 				break;
 			}
 			// KEEP PLAYER IN BOUNDS AND CHANGE VELOCITY
@@ -495,6 +481,21 @@ public class FootyMarathon implements ApplicationListener {
 			if (this.kicking <= 0 && this.tackling <= 0 && this.stun <= 0 && this.runon <= 0) {
 				if (this.position.dst(this.posTarget) > 10)	this.velocity = this.velocity.lerp(this.posTarget.cpy().sub(this.position).nor().scl(this.dirSpeed * this.runSpeed), 0.05f);
 				}
+			// AVOID TEAMMATES
+			if (this.state != PlayerState.runningon && this.state != PlayerState.dribbling) {
+				for (Player m: myTeam) {
+					if (m.position.dst(this.position) < 150) {
+						if (m instanceof ComPlayer) this.posTarget.add(this.position.cpy().sub(m.position).nor().scl(100 * (float) Math.exp(-position.dst(this.position))));
+						else this.posTarget.add(this.position.cpy().sub(m.position).nor().scl(5));
+					}
+				}
+			}
+			// impact on ball
+			if (this.position.dst(ball.position.x, ball.position.y) < this.SIZE * CONTROL * 0.75 && this.stun <= 0 && this.kicking <= 0) {
+				Vector2 bestBallDir = this.position.cpy().add(new Vector2(this.posTarget.cpy().sub(this.position).nor().scl(SIZE + CONTROL)))
+						.sub(new Vector2(ball.position.x, ball.position.y)).scl(1).limit(this.dirSpeed * this.runSpeed * 1.5f);
+				ball.velocity.add(new Vector3(bestBallDir.x, bestBallDir.y, -ball.velocity.z * 0.5f));
+			}
 			// ACTIONS TO TAKE EVERY TIME THE COMPUTER PLAYER REASSESSES
 			this.thinkCounter -= deltaTime;
 			if (this.thinkCounter <= 0) {
@@ -525,47 +526,95 @@ public class FootyMarathon implements ApplicationListener {
 					Vector2 bestVector = new Vector2(250,0).rotate(dirTarget.angle());
 					Player passTarget = null;
 					float passTime = 0;
-					float ang = dirTarget.angle() - 50 + (float) (5 * Math.random());
+					float ang = this.angle - 50 + (float) (5 * Math.random());
 					Vector2 passRequired = new Vector2();
 					passEnd = bestVector.cpy();
-					Vector2 ballPos = new Vector2(ball.position.x, ball.position.y);
-					while (ang <= dirTarget.angle() + 50) {
+					String bestDetails = "";
+					while (ang <= this.angle + 50) {
 						for (Player p: this.myTeam) {
+							String details = "";
 							Vector2 intersect = new Vector2();
 							Intersector.intersectLines(ballPos, ballPos.cpy().add(new Vector2(1, 0).rotate(ang)), p.position, p.position.cpy().add(p.velocity), intersect);
 							passRequired = new Vector2(intersect.x - ball.position.x, intersect.y - ball.position.y);
 							float time = (intersect.x - p.position.x) / p.velocity.x;
 							float denom = 1 - (float) Math.exp(time * -GROUND_RESISTANCE);
 							Vector2 passVector = passRequired.scl(GROUND_RESISTANCE/denom);
-							if (time < 0.2f && time > 10 || passRequired.len() > 1000 || passRequired.len()/time < 100 || passVector.len() * Math.exp(-GROUND_RESISTANCE * time) > 500
-									) continue;
-							float newScore = 1 - (float) Math.pow(1 - 600/passVector.len(), 2);
-							for (Player q: this.theirTeam) {
-								if (between(this, intersect, q, 10)) newScore -= 1;
-								newScore -= Math.exp(-intersect.dst(q.position)/50);
-								newScore += Math.exp(-q.position.dst(ballPos)/100);
+							if (time < 0.2f && time > 10 || passRequired.len() > 1000 || passRequired.len()/time < 100 ||
+									passVector.len() * Math.exp(-GROUND_RESISTANCE * time) > 500  || angCompare(passRequired.angle(), ang) > 10) {
+								details += "Ang: " + ang + " to " + p.name + ", rejected; pass angle" + passRequired.angle() + ", time: " + time + ", pass length:" + passRequired.len() + ", ratio: " + passRequired.len()/time + ", impulse: " + passVector.len() * Math.exp(-GROUND_RESISTANCE * time);
+								if (PASSPAUSE) System.out.println(details);
+								continue;
 							}
-							if (Math.abs(intersect.x) > 640 || Math.abs(intersect.y) > 1024) newScore -= 1;
-							if (p.equals(this.calledFor)) newScore += 0.5;
+							float newScore = (float) Math.exp(-Math.abs(800 - passVector.len())/500);
+							details += "Ang: " + ang + " to " + p.name + ", base sc: " + newScore + " (" + passVector.len() + ")";
+							for (Player q: this.theirTeam) {
+								if (between(this, intersect, q, 10)) {
+									newScore -= 1;
+									details += " Int Pl: " + q.name + "=-1";
+								}
+								newScore -= Math.exp(-intersect.dst(q.position)/(q.dirSpeed*time));
+								if (Math.exp(-intersect.dst(q.position)/(time*q.dirSpeed)) > 0.01f) details += " Prox pen: " + q.name + " " + Math.exp(-intersect.dst(q.position)/(time*q.dirSpeed));
+								newScore += Math.exp(-q.position.dst(ballPos)/100);
+								if (Math.exp(-q.position.dst(ballPos)/100) > 0.01f) details += " Press bon: " + q.name + " " + Math.exp(-q.position.dst(ballPos)/100);
+							}
+							if (Math.abs(intersect.x) > 640 || Math.abs(intersect.y) > 1024) {
+								newScore -= 1;
+								details += " Off pitch: -1";
+							}
+							if (p.equals(this.calledFor)) {
+								newScore += 0.5;
+								details += " Called for: +0.5";
+							}
+							if (PASSPAUSE) System.out.println(details + " Net: "+ newScore);
 							if (newScore > bestScore) {
 								bestScore = newScore;
 								bestVector = passVector.cpy();
 								passTarget = p;
 								passTime = time;
 								passEnd = intersect;
+								bestDetails = details;
 							}
 						}
-						ang += 5;
+						ang += 2.5;
 					}
 					bestScore *= (210 - angCompare(passEnd.cpy().sub(this.position).angle(), goalTarget.cpy().sub(this.position).angle()))/1.4f;
+					if (PASSPAUSE) {
+						System.out.println(" Net best: " + bestScore);
+						PASSPAUSE = false;
+						PAUSED = true;
+					}
+					
+					// Calculate Shooting scores
+					float bestShoot = 0;
+					float shootScore = 0;
+					Vector3 shootVect = new Vector3(0, 0, 0);
+					float shootCurl = 0;
+					for (int i=(2*(1-this.team)); i<2*(2-this.team); i++) {
+						if (angCompare(this.angle, corners[i].cpy().sub(ballPos).angle()) < 45) {
+							shootScore = ((float) Math.random() * 40) - 30 + (float) Math.exp(-corners[i].dst(ballPos) / 800) * 250;
+							shootScore -= Math.pow((corners[i].cpy().sub(ballPos).angle() % 180 - 90)/5, 2);
+							for (Player p: theirTeam) {
+								if (between(ballPos, corners[i], p, 10)) shootScore -= 50;
+							}
+						}
+						if (shootScore >= bestShoot + Math.random() * 50) {
+							bestShoot = shootScore;
+							Vector2 cornerDir = corners[i].cpy().sub(ballPos).nor().scl(Math.max(400 + corners[i].dst(ballPos)/2, 700));
+							cornerDir.rotate(8 - ((float) Math.random() * 16));
+							shootCurl = ((float) Math.random() * 50) - 25;
+							cornerDir.rotate(-shootCurl * cornerDir.len() / 2000);
+							shootVect = new Vector3(cornerDir.x, cornerDir.y, (float) Math.pow(cornerDir.len(), 1.9)/(1600 + (float)Math.random() * 400));
+						}
+					}
 					
 					// Decide what to do based on scores
-					if (directions.get(0).score > 50 && directions.get(0).score > bestScore) {
-						System.out.println("Dribbling: " + directions.get(0).score + ", Passing: " + bestScore);
+					if (directions.get(0).score > 50 && directions.get(0).score > bestScore  && directions.get(0).score > bestShoot) {
+						System.out.println("Dribbling: " + directions.get(0).score + ", Passing: " + bestScore + ", Shooting : " + bestShoot);
 						this.posTarget = this.position.cpy().add(new Vector2(directions.get(0).score - 50, 0).rotate(directions.get(0).angle));
 					}
-					else if (bestScore > 50) {
-						System.out.println("Passing: " + bestScore + ", Dribbling: " + directions.get(0).score);
+					else if (bestScore > 50 && bestScore > bestShoot) {
+						System.out.println("Passing: " + bestScore + ", Dribbling: " + directions.get(0).score + ", Shooting: " + bestShoot);
+						System.out.println(bestDetails);
 						ball.velocity = new Vector3(bestVector.x, bestVector.y, 0);
 						this.possession = false;
 						if (passTarget != null) {
@@ -573,6 +622,15 @@ public class FootyMarathon implements ApplicationListener {
 						}
 						posPlayer = null;
 						this.kicking = 0.5f;
+					}
+					else if (bestShoot > 50) {
+						System.out.println("Shooting: " + bestShoot + ", Passing: " + bestScore + ", Dribbling: " + directions.get(0).score);
+						this.kicking = 0.8f;
+						this.possession = false;
+						posPlayer = null;
+						ball.possession = -1;
+						ball.velocity = shootVect;
+						ball.curl = shootCurl;
 					}
 					else {
 						this.posTarget = this.position.cpy();
@@ -592,10 +650,36 @@ public class FootyMarathon implements ApplicationListener {
 					this.posTarget = this.formation.cpy();
 					break;
 				case chasing:
+					if (new Vector2(this.position.x, this.position.y).dst(new Vector2(ball.position.x, ball.position.y)) < (this.SIZE + Ball.SIZE) * 0.55
+							&& this.kicking <= 0 && ball.position.z < 50) {
+						if (this.tackling <= 0 && (ball.possession != (1-this.team)) &&
+								this.velocity.cpy().sub(ball.velocity.x, ball.velocity.y).len() < 500) {
+							clearPossession();
+							this.possession = true;
+							this.state = PlayerState.dribbling;
+							this.runSpeed = DRIB_PEN;
+							this.posTarget = goalTarget.rotate((float) Math.random()*40-20);
+							this.runon = 0;
+							passedTo = null;
+							ball.possession = this.team;
+							posPlayer = this;
+							ball.curl = 0;
+							ball.rotation = 0;
+							ball.velocity = new Vector3();
+						}
+						else if (this.tackling > 0) {
+							ball.velocity.lerp(new Vector3(this.velocity.x, this.velocity.y, 2).scl(1.5f), 0.2f);
+							if (posPlayer != null) {
+								posPlayer.stun = 0.8f;
+							}
+						}
+					}
 					break;
 				case stunned:
 					break;
 				case runningon:
+					break;
+				case waiting:
 					break;
 				}
 			}
@@ -613,7 +697,7 @@ public class FootyMarathon implements ApplicationListener {
 				}
 			}
 			this.stun = Math.max(0, this.stun - deltaTime);
-			this.label = this.state.toString();
+			this.label = this.name + ": " + this.state.toString();
 		}
 	}
 	
@@ -641,7 +725,6 @@ public class FootyMarathon implements ApplicationListener {
 
 		private void update(float deltaTime) {
 			this.oldVelocity = this.velocity.cpy();
-//			System.out.print(masterTime + " " + this.position + " " + this.velocity.cpy().scl(deltaTime));
 			if(deltaTime == 0) return;
 			this.roll += Math.sqrt(new Vector2(this.velocity.x, this.velocity.y).len()) * deltaTime * 10;
 			if (Math.abs(this.position.y) > 1008  && Math.abs(this.position.y) < 1056 &&
@@ -652,7 +735,11 @@ public class FootyMarathon implements ApplicationListener {
 			if (Math.abs(this.position.x) < 150 && this.position.z < 100) {
 				if (Math.abs(this.position.y) < 1016) {
 					if (Math.abs(this.position.add(this.velocity.cpy().scl(deltaTime)).y) > 1016) {
+						if (this.position.y > 0) score[1] ++;
+						else score[0] ++;
 						System.out.println("GOAL!!!");
+						waitTime = 2;
+						restartPosition = new Vector3(0, 0, 0);
 					}
 				}
 				else if (Math.abs(Math.abs(this.position.y) - 1056) < 10) {
@@ -696,16 +783,14 @@ public class FootyMarathon implements ApplicationListener {
 			}
 			this.rotation =  (this.rotation + this.curl * deltaTime * 25) % 360;
 			this.velocity.rotate(new Vector3(0, 0, 1), this.curl * deltaTime);
-			messagea = "Ball Height: " + this.position.z;
 //			System.out.println(" " + this.position);
-			messageb = "Ball impedence: " + ((this.velocity.len() / this.oldVelocity.len()) - 1) / deltaTime;
 		}
 
 		private void render(float deltaTime) {
 			TextureRegion frame = null;
 			frame = ballAnim.getKeyFrame(ball.roll);
 			batch.draw(shadow, this.position.x - Ball.SIZE/2 + this.position.z / 10, this.position.y - Ball.SIZE/2 + this.position.z / 10, Ball.SIZE/2, Ball.SIZE/2, Ball.SIZE, Ball.SIZE, 1, 1, 0);
-			batch.draw(frame, this.position.x - Ball.SIZE/2, this.position.y - Ball.SIZE/2, Ball.SIZE/2, Ball.SIZE/2, Ball.SIZE, Ball.SIZE, (1f + this.position.z/250), (1f + this.position.z/250), this.angle + this.rotation);
+			batch.draw(frame, this.position.x - Ball.SIZE/2, this.position.y - Ball.SIZE/2, Ball.SIZE/2, Ball.SIZE/2, Ball.SIZE, Ball.SIZE, (1f + this.position.z/150), (1f + this.position.z/150), this.angle + this.rotation);
 		}
 		
 		public ArrayList<Player> getPlayerList(int team) {
@@ -765,13 +850,19 @@ public class FootyMarathon implements ApplicationListener {
 	private Matrix4 normalProjection;
 	private String messagea, messageb;
 	boolean PAUSED = false;
+	boolean PASSPAUSE = false;
 	boolean wasPressed = false;
+	float waitTime = 0;
+	Vector3 restartPosition;
 	private Player posPlayer;
 	private ShapeRenderer shapeRenderer;
 	Vector2[] posts = {new Vector2(-140, 1008), new Vector2(140, 1008), new Vector2(-140, -1008), new Vector2(140, -1008)};
+	Vector2[] corners = {new Vector2(-130, 1008), new Vector2(130, 1008), new Vector2(-130, -1008), new Vector2(130, -1008)};
 	Vector2 passEnd = null;
 	Player passedTo = null;
 	float masterTime = 0;
+	List<String> names = Arrays.asList("Clive", "Brian", "Roger", "Iain", "Clifford", "Brenda", "Arnold", "Stan", "Percy", "Neville", "Olaf", "Frank");
+	int score[] = {0, 0};
 
 	@Override
 	public void create() {
@@ -798,14 +889,14 @@ public class FootyMarathon implements ApplicationListener {
 		complayers = new ComPlayer[teamSizes[0] + teamSizes[1] - 1];
 		allplayers = new Player[teamSizes[0] + teamSizes[1]];
 		for (int i = 0; i < teamSizes[1]; i++) {
-			Vector2 pos = new Vector2(0, -100 - (i * 200));
-			complayers[i] = new ComPlayer(pos, 1, "Clive", pos.cpy());
+			Vector2 pos = new Vector2((float)Math.random() * 500 - 250, 600 - (i * 400));
+			complayers[i] = new ComPlayer(pos, 1, names.get(i), pos.cpy());
 			complayers[i].dirSpeed = 160;
 			allplayers[i] = complayers[i];
 		}
 		for (int i = teamSizes[1]; i < teamSizes[0] + teamSizes[1] - 1; i++) {
-			Vector2 pos = new Vector2(0, 100 + (i * 200));
-			complayers[i] = new ComPlayer(pos, 0, "Gavin", pos.cpy());
+			Vector2 pos = new Vector2((float)Math.random() * 500 - 250, -600 + ((i- teamSizes[1]) * 400));
+			complayers[i] = new ComPlayer(pos, 0, names.get(i), pos.cpy());
 			complayers[i].dirSpeed = 160;
 			allplayers[i] = complayers[i];
 		}
@@ -834,7 +925,6 @@ public class FootyMarathon implements ApplicationListener {
 			Array<TextureRegion> spriteArray = new Array<TextureRegion>(true, 7);
 			for (int j=0; j<7; j++) {
 				spriteArray.add(regions[spriteAtlas[i][j][1]][spriteAtlas[i][j][0]]);
-//				System.out.println(i + " " + j + " " + thisEntry.get("x") + thisEntry.get("y"));
 			}
 			playerRuns.add(new Animation(15f, spriteArray));
 			playerRuns.get(i).setPlayMode(Animation.LOOP_PINGPONG);
@@ -847,7 +937,6 @@ public class FootyMarathon implements ApplicationListener {
 			Array<TextureRegion> spriteArray = new Array<TextureRegion>(true, 7);
 			for (int j=0; j<7; j++) {
 				spriteArray.add(regions[spriteAtlas[i][j][1]+5][spriteAtlas[i][j][0]]);
-//				System.out.println(i + " " + j + " " + thisEntry.get("x") + thisEntry.get("y"));
 			}
 			playerRuns.add(new Animation(15f, spriteArray));
 			playerRuns.get(i+8).setPlayMode(Animation.LOOP_PINGPONG);
@@ -885,8 +974,15 @@ public class FootyMarathon implements ApplicationListener {
 			Gdx.gl.glViewport((int) glViewPort.x, (int) glViewPort.y, (int) glViewPort.width, (int) glViewPort.height);
 			float deltaTime = Gdx.graphics.getDeltaTime();
 			masterTime += deltaTime;
-			messagea = "Stun : " + users[0].stun;
-			messageb = "Tackling : " + users[0].tackling;
+			if (waitTime > 0) {
+				waitTime -= deltaTime;
+				if (waitTime <= 0) {
+					waitTime = 0;
+					ball.position = restartPosition.cpy();
+				}
+			}
+			messagea = "Score: " + score[0] + " - " + score[1];
+			messageb = "Curl: " + ball.curl;
 			ballPlayers.set(0, ball.getPlayerList(0));
 			ballPlayers.set(1, ball.getPlayerList(1));
 			ballPlayers.set(2, ball.getPlayerList(-1));
@@ -901,6 +997,8 @@ public class FootyMarathon implements ApplicationListener {
 				posPlayer = closePlayer;
 				closePlayer.possession = true;
 			}
+			int runnerOffset = 0;
+			for (Player p: ballPlayers.get(2)) if (p.runon > 0) runnerOffset += 1;
 			// REASSIGN ROLES
 			for (int team = 0; team < 2; team++) {
 				ArrayList<Player> thisTeam = ballPlayers.get(team);
@@ -910,13 +1008,14 @@ public class FootyMarathon implements ApplicationListener {
 						ComPlayer thisPlayer = null;
 						for (ComPlayer c: complayers) if (c.equals(thisTeam.get(i))) thisPlayer = c;
 						if (thisPlayer == null) continue;
-						if (thisPlayer.stun > 0) thisPlayer.state = PlayerState.stunned;
+						if (waitTime > 0) thisPlayer.state = PlayerState.waiting;
+						else if (thisPlayer.stun > 0) thisPlayer.state = PlayerState.stunned;
 						else if (thisPlayer.runon > 0) thisPlayer.state = PlayerState.runningon;
 						else if (thisPlayer.possession) {
 							thisPlayer.state = PlayerState.dribbling;
 							thisPlayer.runSpeed = DRIB_PEN;
 						}
-						else if (i == 0) thisPlayer.state = PlayerState.chasing;
+						else if (i == 0 && runnerOffset == 0) thisPlayer.state = PlayerState.chasing;
 						else if (supCount < SUPPORT) {
 							thisPlayer.state = PlayerState.moving;
 							supCount += 1;
@@ -930,7 +1029,8 @@ public class FootyMarathon implements ApplicationListener {
 						ComPlayer thisPlayer = null;
 						for (ComPlayer c: complayers) if (c.equals(thisTeam.get(i))) thisPlayer = c;
 						if (thisPlayer == null) continue;
-						if (thisPlayer.stun > 0) thisPlayer.state = PlayerState.stunned;
+						if (waitTime > 0) thisPlayer.state = PlayerState.waiting;
+						else if (thisPlayer.stun > 0) thisPlayer.state = PlayerState.stunned;
 						else if (chaseCount < CHASERS) {
 							thisPlayer.state = PlayerState.chasing;
 							chaseCount += 1;
@@ -998,7 +1098,7 @@ public class FootyMarathon implements ApplicationListener {
 			else wasPressed = false;
 		}
 	}
-
+	
     @Override
     public void resize(
         int width,
@@ -1119,19 +1219,25 @@ public class FootyMarathon implements ApplicationListener {
 	
 	public boolean between(Player a, Player b, Player c, float angle) {
 		if (a.position.dst(b.position) < a.position.dst(c.position)) return false;
-		if (Math.abs(((b.position.cpy().sub(a.position).angle() - c.position.cpy().sub(a.position).angle() + 180) % 360) - 180) < angle) return false;
+		if (angCompare(b.position.cpy().sub(a.position).angle(), c.position.cpy().sub(a.position).angle()) > angle) return false;
 		return true;
 	}
 	
 	public boolean between(Player a, Ball b, Player c, float angle) {
 		if (a.position.dst(new Vector2(b.position.x, b.position.y)) < a.position.dst(c.position)) return false;
-		if (Math.abs(((new Vector2(b.position.x, b.position.y).sub(a.position).angle() - c.position.cpy().sub(a.position).angle() + 180) % 360) - 180) < angle) return false;
+		if (angCompare(new Vector2(b.position.x, b.position.y).sub(a.position).angle(), c.position.cpy().sub(a.position).angle()) > angle) return false;
 		return true;		
 	}
 	
 	public boolean between(Player a, Vector2 b, Player c, float angle) {
-		if (a.position.dst(new Vector2(b.x, b.y)) < a.position.dst(c.position)) return false;
-		if (Math.abs(((new Vector2(b.x, b.y).sub(a.position).angle() - c.position.cpy().sub(a.position).angle() + 180) % 360) - 180) < angle) return false;
+		if (a.position.dst(b) < a.position.dst(c.position)) return false;
+		if (angCompare(b.cpy().sub(a.position).angle(), c.position.cpy().sub(a.position).angle()) > angle) return false;
+		return true;
+	}	
+
+	public boolean between(Vector2 a, Vector2 b, Player c, float angle) {
+		if (a.dst(b) < a.dst(c.position)) return false;
+		if (angCompare(b.cpy().sub(a).angle(), c.position.cpy().sub(a).angle()) > angle) return false;
 		return true;		
 	}	
 	
