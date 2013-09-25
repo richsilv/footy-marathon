@@ -179,6 +179,7 @@ public class Player implements Comparator<Player> {
 
 		boolean setPiece;
 		float inputTime;
+		float misControl;
 		Vector2 dribbleTarget;
 		
 		public User(Vector2 position, int team, String name, Vector2 formation) {
@@ -189,6 +190,7 @@ public class Player implements Comparator<Player> {
 			this.theirTeamPolar = new Polar[teamSizes[1 - this.team]];
 			this.inputTime = 0;
 			this.dribbleTarget = null;
+			this.misControl = 0;
 		}
 
 		public void recalcPlayer(float deltaTime) {
@@ -219,7 +221,7 @@ public class Player implements Comparator<Player> {
 			else if (touchCount > 0) {
 				if (touchCount < 0.2) {
 					Vector2 target = screenToWorld(touchStart);
-					if (!this.possession) {
+					if (!this.possession && this.misControl < masterTime - USER_MISCONTROL_TIME) {
 						if (target.dst(new Vector2(ball.position.x, ball.position.y)) < 50) {
 							this.state = PlayerState.chasing;
 							System.out.println("Chasing ball");
@@ -230,9 +232,35 @@ public class Player implements Comparator<Player> {
 							System.out.println("Moving user to " + this.posTarget + ", based on cam position of " + camera.position + " and touch at coords " + touchStart);
 						}
 					}
+					else if (this.state == PlayerState.dribbling) {
+						boolean usedUp = false;
+						for (Player c: myTeam) {
+							if (c.position.dst(target) < 50 && !c.equals(this)) {
+								calledFor = c;
+								usedUp = true;
+							}
+						}
+						if (!usedUp) {
+							System.out.println("Change dribble target");
+							this.dribbleTarget = screenToWorld(touchStart);
+						}
+					}
+				}
+				else {
+					Vector2 touchEnd = new Vector2(Gdx.input.getX(), screenHeight - Gdx.input.getY());
+					Vector2 kickTarget = screenToWorld(touchEnd);
+					Vector2 kickDir = kickTarget.cpy().sub(ball.position.x, ball.position.y).nor().scl(Math.max(Math.min(300, touchCount * 500), 700));
+					ball.velocity = new Vector3(kickDir.x, kickDir.y, (float) Math.pow(kickDir.len(), 1.9)/(1200 + (float)Math.random() * 800));
+					ball.curl = 0;
+					this.kicking = 0.8f;
+					this.possession = false;
+					posPlayer = null;
+					ball.possession = -1;
+					lastTouch = this.team;
 				}
 				touchCount = 0;
 				this.inputTime = 0;
+				screenTouch = screenToWorld(touchStart);
 			}
 			// CHECK FOR KEYBOARD CONTROL
 			if(Gdx.input.isKeyPressed(Keys.LEFT)) {
@@ -274,8 +302,8 @@ public class Player implements Comparator<Player> {
 					this.inputTime = 0;
 				}
 			}
+			if (this.velocity.len() > 0.1) this.angle = this.velocity.angle();
 			if (Gdx.input.isKeyPressed(Keys.ANY_KEY)) {
-				if (this.velocity.len() > 0.1) this.angle = this.velocity.angle();
 				if (this.velocity.len() < 0.1) {
 					this.velocity = new Vector2();
 				}
@@ -328,7 +356,8 @@ public class Player implements Comparator<Player> {
 			}
 			else {
 				dirTarget = new Vector2(0, 0);
-				if (this.state != null) this.updatePlayer(deltaTime);				
+				if (this.state != null) this.updatePlayer(deltaTime);
+//				System.out.println("Speed: " + this.velocity.len() + ", target: " + this.dribbleTarget + ", current target: " + this.posTarget);
 			}
 			if (Gdx.input.isKeyPressed(Keys.Z)) {
 				if ((this.possession || this.kickBuilder > 0) && this.tackling <= 0) {
@@ -405,7 +434,7 @@ public class Player implements Comparator<Player> {
 					}
 				}
 			}
-			if (this.kicking <= 0 && this.tackling <= 0 && this.stun <= 0) {
+			if (this.kicking <= 0 && this.tackling <= 0 && this.stun <= 0 && this.state == null) {
 				this.velocity = this.velocity.lerp(dirTarget, 0.1f);
 			}
 			else {
@@ -468,7 +497,7 @@ public class Player implements Comparator<Player> {
 			Vector2 ballPos = new Vector2(ball.position.x, ball.position.y);
 			float ballRel = ballPos.cpy().sub(this.position).dot(new Vector2(1,0).rotate(this.angle));
 			Vector2 goalTarget;
-			if (this instanceof User && ((User)this).dribbleTarget != null) goalTarget = ((User)this).dribbleTarget; 
+			if (this instanceof User && ((User)this).dribbleTarget != null) goalTarget = ((User)this).dribbleTarget.cpy(); 
 			else goalTarget = new Vector2(0, -1008 + (this.team * 2016));
 			Vector2 myGoal = new Vector2(0, 1008 - (this.team * 2016));
 			Vector2 offset = new Vector2(ball.position.x, ball.position.y).sub(goalTarget).nor().scl(10);
@@ -542,7 +571,10 @@ public class Player implements Comparator<Player> {
 				if (this.position.dst(this.posTarget) < 1) this.posTarget = this.position;
 				break;
 			case moving:
-				if (this.position.dst(this.posTarget) < 1) this.posTarget = this.position;
+				if (this.position.dst(this.posTarget) < 10) {
+					this.posTarget = this.position;
+					this.velocity.scl(0.95f);
+				}
 				break;
 			case positioning:
 				break;
@@ -645,12 +677,14 @@ public class Player implements Comparator<Player> {
 				}
 			}
 			// ACTIONS TO TAKE EVERY TIME THE COMPUTER PLAYER REASSESSES
-			Vector2 midGoal = new Vector2(0, -1008 + (2016 * this.team));
+			Vector2 midGoal;
+			if (this instanceof User && ((User)this).dribbleTarget != null) midGoal = ((User)this).dribbleTarget;
+			else midGoal = new Vector2(0, -1008 + (2016 * this.team));
 			float midGoalAngle = midGoal.cpy().sub(this.position).angle();
 			this.thinkCounter -= deltaTime;
 			if (this.thinkCounter <= 0) {
 				this.thinkCounter = this.thinkTime;
-				if (this instanceof User) ((User)this).dribbleTarget = null;
+				if (this instanceof User && ((User)this).dribbleTarget != null && ((User)this).dribbleTarget.dst(this.position) < this.SIZE) ((User)this).dribbleTarget = null;
 				switch(this.state) {
 				case dribbling:
 					// Calculate dribbling scores
@@ -779,7 +813,7 @@ public class Player implements Comparator<Player> {
 					// Decide what to do based on scores
 
 					if (directions.get(0).score > 50 && directions.get(0).score > bestScore  && directions.get(0).score > bestShoot) {
-						System.out.println("Dribbling: " + directions.get(0).score + ", Passing: " + bestScore + ", Shooting : " + bestShoot);
+						System.out.println("Dribbling" + goalTarget + ": " + directions.get(0).score + ", Passing: " + bestScore + ", Shooting : " + bestShoot);
 						this.posTarget = this.position.cpy().add(new Vector2(directions.get(0).score - 50, 0).rotate(directions.get(0).angle));
 						lastTouch = this.team;
 					}
@@ -1417,7 +1451,7 @@ public class Player implements Comparator<Player> {
 					// Decide what to do based on scores
 
 					if (directions.get(0).score > 50 && directions.get(0).score > bestScore  && directions.get(0).score > bestShoot) {
-						System.out.println("Dribbling: " + directions.get(0).score + ", Passing: " + bestScore + ", Shooting : " + bestShoot);
+						System.out.println("Dribbling" + goalTarget + ": " + directions.get(0).score + ", Passing: " + bestScore + ", Shooting : " + bestShoot);
 						this.posTarget = this.position.cpy().add(new Vector2(directions.get(0).score - 50, 0).rotate(directions.get(0).angle));
 						lastTouch = this.team;
 					}
@@ -2038,7 +2072,9 @@ public class Player implements Comparator<Player> {
 	private static final float RICOCHET_COEFFICIENT = 0.5f;
 	private static final float CONTROL_DELAY = 0.2f;
 	private static final float TACKLE_SLOWDOWN = 2;
-	private static final float TAKEOVER_DELAY = 5;
+	private static final float TAKEOVER_DELAY = 15;
+	private static final float SCREEN_FACTOR = 1.5f;    //  NEEDS TO BE 1.0 FOR ANDROID, 1.5 FOR DESKTOP
+	private static final float USER_MISCONTROL_TIME = 0.5f;
 	private OrthographicCamera camera;
 	private float screenWidth;
 	private float screenHeight;
@@ -2084,6 +2120,7 @@ public class Player implements Comparator<Player> {
 	Vector2[] posts = {new Vector2(-140, 1008), new Vector2(140, 1008), new Vector2(-140, -1008), new Vector2(140, -1008)};
 	Vector2[] corners = {new Vector2(-130, 1008), new Vector2(130, 1008), new Vector2(0, 1008), new Vector2(-130, -1008), new Vector2(130, -1008), new Vector2(0, -1008)};
 	Vector2 passEnd = null;
+	Vector2 screenTouch = null;
 	Player passedTo = null;
 	float masterTime = 0;
 	float touchCount = 0;
@@ -2108,7 +2145,7 @@ public class Player implements Comparator<Player> {
 		messagea = "";
 		messageb = "";
 		
-		camera = new OrthographicCamera(screenWidth * 1.5f, screenHeight * 1.5f);   //  NEEDS TO BE 1.0 FOR ANDROID, 1.5 FOR DESKTOP
+		camera = new OrthographicCamera(screenWidth * SCREEN_FACTOR, screenHeight * SCREEN_FACTOR);
 		batch = new SpriteBatch();
 		
         users = new User[1];
@@ -2362,6 +2399,10 @@ public class Player implements Comparator<Player> {
 						ComPlayer thisPlayer = null;
 						for (ComPlayer c: allplayers) if (c.equals(thisTeam.get(i))) thisPlayer = c;
 						if (thisPlayer == null || (thisPlayer instanceof User  && ((User)thisPlayer).inputTime < TAKEOVER_DELAY)) continue;
+						else if (thisPlayer instanceof User) {
+							if (!thisPlayer.possession && ((User)thisPlayer).misControl > masterTime - USER_MISCONTROL_TIME) thisPlayer.state = PlayerState.chasing;
+							else if (thisPlayer.possession) thisPlayer.state = PlayerState.dribbling; 
+						}
 						else if (thisPlayer.stun > 0) thisPlayer.state = PlayerState.stunned;
 						else if (thisPlayer.runon > 0) thisPlayer.state = PlayerState.runningon;
 						else if (thisPlayer.diving > 0) thisPlayer.state = PlayerState.diving;
@@ -2461,6 +2502,7 @@ public class Player implements Comparator<Player> {
 			shapeRenderer.begin(ShapeType.Line);
 			shapeRenderer.setColor(0, 0, 1, 1);
 			if (passEnd != null) shapeRenderer.circle(passEnd.x, passEnd.y, 10);
+			if (screenTouch != null) shapeRenderer.circle(screenTouch.x, screenTouch.y, 15);
 			if (savePos != null) {
 				shapeRenderer.setColor(1, 1, 0, 1);
 				shapeRenderer.line(new Vector2(ball.position.x, ball.position.y), savePos);
@@ -2517,7 +2559,7 @@ public class Player implements Comparator<Player> {
 	}
 
 	private Vector2 screenToWorld(Vector2 screen) {
-		return new Vector2(screen.x + camera.position.x - screenWidth/2, screen.y + camera.position.y - screenHeight/2);
+		return new Vector2((screen.x - screenWidth/2) * SCREEN_FACTOR + camera.position.x, (screen.y - screenHeight/2) * SCREEN_FACTOR + camera.position.y);
 	}
 	
 	private void collisionDetect(float deltaTime) {
@@ -2600,18 +2642,11 @@ public class Player implements Comparator<Player> {
 	}
 	
 	public void clearPossession() {
-		for (ComPlayer c: complayers) {
+		for (ComPlayer c: allplayers) {
 			if (c.possession) {
 				c.possession = false;
+				if (c instanceof User) ((User)c).misControl = masterTime;
 //				if (c.tackling <= 0) c.stun = 1.1f;
-			}
-		}
-		if (users != null) {
-			for (User u: users) {
-				if (u.possession) { 
-					u.possession = false;
-					//				if (u.tackling <= 0) u.stun = 1.1f;
-				}
 			}
 		}
 	}
